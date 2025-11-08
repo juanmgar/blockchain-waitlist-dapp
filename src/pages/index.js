@@ -1,23 +1,32 @@
 import detectEthereumProvider from "@metamask/detect-provider";
+import { decodeError } from "@ubiquity-os/ethers-decode-error";
 import { Contract, ethers } from "ethers";
 import { useEffect, useRef, useState } from "react";
-import { Container, Button, Card, Form, Alert, Row, Col } from "react-bootstrap";
-import { decodeError } from "@ubiquity-os/ethers-decode-error";
-import tokenManifest from "./contracts/TokenEspera.json";
-import listaManifest from "./contracts/ListaEspera.json";
+import tokenManifest from "../contracts/TokenEspera.json";
+import listaManifest from "../contracts/ListaEspera.json";
+import {
+  Container,
+  Card,
+  Button,
+  Alert,
+  Spinner,
+  Row,
+  Col,
+} from "react-bootstrap";
 
 export default function ListaEsperaDApp() {
   const tokenContract = useRef(null);
   const listaContract = useRef(null);
 
   const [account, setAccount] = useState("");
-  const [saldo, setSaldo] = useState(0);
+  const [saldo, setSaldo] = useState("0");
   const [posicion, setPosicion] = useState(null);
-  const [mensaje, setMensaje] = useState("");
   const [isOwner, setIsOwner] = useState(false);
+  const [mensaje, setMensaje] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const tokenAddress = "0x1234567890123456789012345678901234567890";
-  const listaAddress = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd";
+  const tokenEsperaAddress = "0xfBA5f265790B815Dc23c2d8a3aC911B60A128ae6";
+  const listaEsperaAddress = "0xfDd1f02258034fAb07Ff415a0D200fF0462E8901";
 
   useEffect(() => {
     const init = async () => {
@@ -29,7 +38,7 @@ export default function ListaEsperaDApp() {
   const configurarBlockchain = async () => {
     const provider = await detectEthereumProvider();
     if (!provider) {
-      alert("MetaMask no detectado. Instálalo para continuar.");
+      alert("MetaMask not detected. Please install it to continue.");
       return;
     }
 
@@ -40,142 +49,246 @@ export default function ListaEsperaDApp() {
     const providerEthers = new ethers.providers.Web3Provider(provider);
     const signer = providerEthers.getSigner();
 
-    tokenContract.current = new Contract(tokenAddress, tokenManifest.abi, signer);
-    listaContract.current = new Contract(listaAddress, listaManifest.abi, signer);
+    tokenContract.current = new Contract(tokenEsperaAddress, tokenManifest.abi, signer);
+    listaContract.current = new Contract(listaEsperaAddress, listaManifest.abi, signer);
 
-    console.log("Conectado a contratos:", tokenContract.current, listaContract.current);
-
+    // Verifica si el usuario actual es el owner del contrato ListaEspera
     const owner = await listaContract.current.owner();
     setIsOwner(owner.toLowerCase() === accounts[0].toLowerCase());
 
     await actualizarSaldo();
   };
 
+  // Actualiza saldo TokenEspera
   const actualizarSaldo = async () => {
     const balance = await tokenContract.current.balanceOf(account);
     setSaldo(ethers.utils.formatEther(balance));
   };
 
+  // Comprar TokenEspera
   const comprarToken = async () => {
+    setLoading(true);
     try {
-      const tx = await tokenContract.current.comprarToken({
-        value: ethers.utils.parseEther("0.01"), // 0.01 tBNB por token
+      const tx = await tokenContract.current.buyToken({
+        value: ethers.utils.parseEther("0.01"),
       });
       await tx.wait();
-      setMensaje("✅ Token comprado correctamente");
       await actualizarSaldo();
+      setMensaje("✅ Token purchased successfully");
     } catch (err) {
-      setMensaje("❌ Error al comprar token: " + decodeError(err));
+      const decoded = decodeError(err);
+      setMensaje(`❌ Error purchasing token: ${decoded.error}`);
     }
+    setLoading(false);
   };
 
-  const aprobarTokens = async () => {
-    try {
-      const tx = await tokenContract.current.approve(listaAddress, ethers.utils.parseEther("1"));
-      await tx.wait();
-      setMensaje("✅ Aprobación de 1 TokenEspera realizada");
-    } catch (err) {
-      setMensaje("❌ Error al aprobar: " + decodeError(err));
-    }
-  };
-
+  // Registrarse (envía token y llama al contrato)
   const registrarse = async () => {
+    setLoading(true);
     try {
-      const tx = await listaContract.current.registrarse();
-      await tx.wait();
-      setMensaje("✅ Registrado en la lista");
+      // Primero enviar el token directamente al contrato ListaEspera
+      const tx1 = await tokenContract.current.transfer(
+        listaEsperaAddress,
+        ethers.utils.parseEther("1")
+      );
+      await tx1.wait();
+
+      // Luego llamar a register() para anotarse
+      const tx2 = await listaContract.current.register();
+      await tx2.wait();
+
+      await actualizarSaldo();
+      setMensaje("✅ Registered successfully in the waiting list!");
     } catch (err) {
-      setMensaje("❌ Error al registrarse: " + decodeError(err));
+      const decoded = decodeError(err);
+      setMensaje(`❌ ❌ Error registering: ${decoded.error}`);
     }
+    setLoading(false);
   };
 
+  // Consultar posición
   const consultarPosicion = async () => {
     try {
-      const pos = await listaContract.current.miPosicion();
+      const pos = await listaContract.current.myPosition();
       setPosicion(pos.toString());
-      setMensaje(`📋 Tu posición actual: ${pos}`);
-    } catch (err) {
-      setMensaje("⚠️ No estás inscrito o error al consultar posición");
+      setMensaje(`📋 Your current position: ${pos}`);
+    } catch {
+      setMensaje("⚠️ Not registered or error fetching position");
     }
   };
 
+  // Renunciar
   const renunciar = async () => {
+    setLoading(true);
     try {
-      const tx = await listaContract.current.renunciar();
+      const tx = await listaContract.current.resign();
       await tx.wait();
-      setMensaje("✅ Has renunciado (se reembolsa 0.5 TESP)");
       await actualizarSaldo();
+      setMensaje("✅ You resigned successfully (0.5 TESP refunded)");
     } catch (err) {
-      setMensaje("❌ Error al renunciar: " + decodeError(err));
+      const decoded = decodeError(err);
+      setMensaje(`❌ Error resigning: ${decoded.error}`);
     }
+    setLoading(false);
   };
 
+  // 👑 Admin: Retirar primer usuario
   const retirarPrimero = async () => {
+    setLoading(true);
     try {
-      const tx = await listaContract.current.retirarPrimero();
+      const tx = await listaContract.current.removeFirst();
       await tx.wait();
-      setMensaje("✅ Primer usuario retirado de la lista");
+      setMensaje("✅ First user successfully removed from the list");
     } catch (err) {
-      setMensaje("❌ Error al retirar usuario: " + decodeError(err));
+      const decoded = decodeError(err);
+      setMensaje(`❌ Error removing user: ${decoded.error}`);
     }
+    setLoading(false);
+  };
+
+  // Admin: Retirar todos los fondos (tBNB de TokenEspera → wallet del owner)
+  const recoverAllFunds = async () => {
+    setLoading(true);
+    try {
+      const tx = await listaContract.current.recoverAllFunds();
+      await tx.wait();
+      setMensaje("✅ All funds successfully recovered to admin wallet");
+    } catch (err) {
+      const decoded = decodeError(err);
+      setMensaje(`❌ Error recovering funds: ${decoded.error}`);
+    }
+    setLoading(false);
   };
 
   return (
-    <Container className="mt-4" style={{ maxWidth: "720px" }}>
-      <h2 className="mb-4 text-center">🪙 Lista de Espera Descentralizada</h2>
+    <Container className="mt-4" style={{ maxWidth: "700px" }}>
+      <h1 className="text-center mb-4">Lista de Espera DApp</h1>
 
-      {account && (
-        <Alert variant="info">
-          <b>Cuenta:</b> {account}
-          <br />
-          <b>Saldo TokenEspera:</b> {saldo} TESP
+      <Card className="shadow-sm mb-4">
+        <Card.Body>
+          <Card.Title>Account Information</Card.Title>
+          {!account ? (
+            <Alert variant="warning">Connect your wallet with MetaMask.</Alert>
+          ) : (
+            <Alert variant="info">
+              <strong>Account:</strong> {account}
+              <br />
+              <strong>TokenEspera Balance:</strong> {saldo} TESP
+            </Alert>
+          )}
+        </Card.Body>
+      </Card>
+
+      <Card className="shadow-sm mb-4">
+        <Card.Body>
+          <Card.Title>Token Management</Card.Title>
+          <Row className="mt-2">
+            <Col>
+              <Button
+                variant="primary"
+                className="w-100"
+                onClick={comprarToken}
+                disabled={loading}
+              >
+                {loading ? <Spinner size="sm" animation="border" /> : "💰 Buy 1 Token (0.01 tBNB)"}
+              </Button>
+            </Col>
+          </Row>
+        </Card.Body>
+      </Card>
+
+      <Card className="shadow-sm mb-4">
+        <Card.Body>
+          <Card.Title>Waiting List</Card.Title>
+          <Row className="mb-2">
+            <Col>
+              <Button
+                variant="success"
+                className="w-100"
+                onClick={registrarse}
+                disabled={loading}
+              >
+                📝 Register (Send 1 TESP)
+              </Button>
+            </Col>
+            <Col>
+              <Button
+                variant="info"
+                className="w-100"
+                onClick={consultarPosicion}
+                disabled={loading}
+              >
+                🔍 Check Position
+              </Button>
+            </Col>
+          </Row>
+          <Row>
+            <Col>
+              <Button
+                variant="warning"
+                className="w-100"
+                onClick={renunciar}
+                disabled={loading}
+              >
+                🚪 Resign
+              </Button>
+            </Col>
+            {isOwner && (
+              <Col>
+                <Button
+                  variant="danger"
+                  className="w-100"
+                  onClick={retirarPrimero}
+                  disabled={loading}
+                >
+                  👑 Remove First (Admin)
+                </Button>
+              </Col>
+            )}
+          </Row>
+          {posicion && (
+            <Alert variant="light" className="text-center mt-3">
+              📋 Your current position: <strong>{posicion}</strong>
+            </Alert>
+          )}
+        </Card.Body>
+      </Card>
+      <Card className="shadow-sm mb-4">
+        <Card.Body>
+          <Card.Title>Admin Panel</Card.Title>
+          {isOwner ? (
+            <>
+              <Alert variant="success" className="text-center">
+                You are the contract administrator.
+              </Alert>
+
+              <Button
+                variant="outline-success"
+                className="w-100 mt-2"
+                onClick={recoverAllFunds}
+                disabled={loading}
+              >
+                💰 Recover all tBNB (TokenEspera → Wallet)
+              </Button>
+            </>
+          ) : (
+            <Alert variant="warning" className="text-center">
+              Only the contract owner can remove users or withdraw funds.
+            </Alert>
+          )}
+        </Card.Body>
+      </Card>
+
+      {mensaje && (
+        <Alert variant="light" className="text-center mt-3">
+          {mensaje}
         </Alert>
       )}
 
-      <Card className="p-3 shadow-sm mb-4">
-        <h5>Compra y gestión de tokens</h5>
-        <Button className="mt-2 me-2" onClick={comprarToken}>
-          💰 Comprar Token (0.01 tBNB)
-        </Button>
-        <Button className="mt-2" variant="secondary" onClick={aprobarTokens}>
-          ✅ Aprobar uso de 1 TESP
-        </Button>
-      </Card>
-
-      <Card className="p-3 shadow-sm mb-4">
-        <h5>Registro en la lista</h5>
-        <Row>
-          <Col>
-            <Button className="mt-2 w-100" onClick={registrarse}>
-              📝 Registrarse
-            </Button>
-          </Col>
-          <Col>
-            <Button className="mt-2 w-100" variant="info" onClick={consultarPosicion}>
-              🔍 Consultar posición
-            </Button>
-          </Col>
-        </Row>
-        <Row className="mt-3">
-          <Col>
-            <Button className="mt-2 w-100" variant="warning" onClick={renunciar}>
-              🚪 Renunciar
-            </Button>
-          </Col>
-          {isOwner && (
-            <Col>
-              <Button className="mt-2 w-100" variant="danger" onClick={retirarPrimero}>
-                👑 Retirar primero (Admin)
-              </Button>
-            </Col>
-          )}
-        </Row>
-      </Card>
-
-      {mensaje && <Alert variant="light" className="text-center">{mensaje}</Alert>}
-
       <footer className="text-center mt-4 text-muted">
-        <small>Desarrollado por JuanMa Sierra – Proyecto Lista de Espera (BSC Testnet)</small>
+        <small>
+          Developed by JuanMa Sierra — TokenEspera & ListaEspera DApp (BSC Testnet)
+        </small>
       </footer>
     </Container>
   );
