@@ -1,3 +1,10 @@
+import detectEthereumProvider from "@metamask/detect-provider";
+import { Contract, ethers } from "ethers";
+import { useEffect, useRef, useState } from "react";
+import { decodeError } from "@ubiquity-os/ethers-decode-error";
+import tokenManifest from "../contracts/TokenEspera.json";
+import listManifest from "../contracts/ListaEspera.json";
+import { Container, Card, Button, Row, Col } from "react-bootstrap";
 
 export default function WaitlistDApp() {
   // Referencias a instancias de contratos
