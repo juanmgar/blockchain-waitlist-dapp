@@ -1,13 +1,6 @@
-import detectEthereumProvider from "@metamask/detect-provider";
-import { Contract, ethers } from "ethers";
-import { useEffect, useRef, useState } from "react";
-import { decodeError } from "@ubiquity-os/ethers-decode-error";
-import tokenManifest from "../contracts/TokenEspera.json";
-import listManifest from "../contracts/ListaEspera.json";
-import { Container, Card, Button, Row, Col } from "react-bootstrap";
 
 export default function WaitlistDApp() {
-  // Referencia a los contratos desplegados
+  // Referencias a instancias de contratos
   const tokenContract = useRef(null);
   const listContract = useRef(null);
 
@@ -22,11 +15,13 @@ export default function WaitlistDApp() {
   const tokenEsperaAddress = "0xD697AF7b8F070ed4a9291f3fcAB2f20ffBFDe81d";
   const listaEsperaAddress = "0xf3e7A6DEcF55DF3f0A1A083109D638f80FBbF578";
 
+  // Hook de efecto principal: configura blockchain y actualiza datos periódicamente
   useEffect(() => {
     let init = async () => {
       await configurarBlockchain();
       await updateBalance();
       await updateQueueInfo();
+      // Actualiza cada 6 segundos la información de la cola
       const interval = setInterval(updateQueueInfo, 6000);
       return () => clearInterval(interval);
     };
@@ -45,32 +40,37 @@ export default function WaitlistDApp() {
       const accounts = await provider.request({ method: "eth_accounts" });
       setAccount(accounts[0]);
 
+      // Crea proveedor y signer de ethers.js
       let providerEthers = new ethers.providers.Web3Provider(provider);
       let signer = providerEthers.getSigner();
 
+      // Instancia contratos con ABI + dirección + signer
       tokenContract.current = new Contract(tokenEsperaAddress, tokenManifest.abi, signer);
       listContract.current = new Contract(listaEsperaAddress, listManifest.abi, signer);
+
       console.log("Connected to tokenContract:", tokenContract.current);
       console.log("Connected to listContract:", listContract.current);
 
+      // Verifica si el usuario es administrador
       await checkAdmin(accounts[0]);
     } else {
       console.log("No Ethereum provider detected");
     }
   };
 
-  // Verifica si la cuenta conectada es admin
+  // Comprueba si la cuenta conectada es el administrador del contrato de lista
   const checkAdmin = async (acct) => {
     const admin = await listContract.current.admin();
     setIsAdmin(admin.toLowerCase() === acct.toLowerCase());
   };
 
-  //Actualiza el balance del usuario
+  // Obtiene y muestra el balance del usuario en TokenEspera
   const updateBalance = async () => {
     const balance = await tokenContract.current.balanceOf(account);
     setBalance(ethers.utils.formatEther(balance));
   };
 
+  // Actualiza número total de usuarios y posición actual del usuario
   const updateQueueInfo = async () => {
     try {
       const total = await listContract.current.totalUsuarios();
@@ -80,14 +80,14 @@ export default function WaitlistDApp() {
         const pos = await listContract.current.miPosicion();
         setPosition(pos.toNumber());
       } catch {
-        setPosition(null); // not registered
+        setPosition(null); // No registrado en la lista
       }
     } catch (err) {
       console.warn("Error updating queue info:", err.message);
     }
   };
 
-  // Comprar TokenEspera
+  // Permite comprar 1 TokenEspera por 0.01 tBNB
   const buyToken = async () => {
     try {
       const tx = await tokenContract.current.comprarToken({
@@ -103,15 +103,17 @@ export default function WaitlistDApp() {
     }
   };
 
-  // Registrarse
+  // Registra al usuario en la lista de espera (envía 1 TESP)
   const register = async () => {
     try {
+      // Primero se aprueba el uso de 1 TESP
       const approve = await tokenContract.current.approve(
         listaEsperaAddress,
         ethers.utils.parseEther("1")
       );
       await approve.wait();
 
+      // Luego se ejecuta el registro en la lista
       const tx = await listContract.current.registrar();
       await tx.wait();
       await updateBalance();
@@ -124,7 +126,7 @@ export default function WaitlistDApp() {
     }
   };
 
-  // Withdraw from waiting list
+  // Permite al usuario renunciar y recuperar parte del token
   const resign = async () => {
     try {
       const tx = await listContract.current.renunciar();
@@ -139,7 +141,7 @@ export default function WaitlistDApp() {
     }
   };
 
-  // Admin: remove first user
+  // Solo el admin puede eliminar al primer usuario de la cola
   const removeFirst = async () => {
     try {
       const tx = await listContract.current.eliminarPrimero();
@@ -153,7 +155,7 @@ export default function WaitlistDApp() {
     }
   };
 
-  // View position in the list
+  // Muestra la posición actual del usuario en la lista
   const viewPosition = async () => {
     try {
       const pos = await listContract.current.miPosicion();
@@ -166,7 +168,7 @@ export default function WaitlistDApp() {
     }
   };
 
-  // Withdraw funds from TokenEspera (owner only)
+  // Admin: retira fondos del contrato TokenEspera
   const withdrawContractFunds = async () => {
     try {
       const owner = await tokenContract.current.owner();
@@ -184,7 +186,7 @@ export default function WaitlistDApp() {
     }
   };
 
-  // View the BNB balance of the TokenEspera contract directly
+  // Consulta el balance en BNB del contrato TokenEspera
   const viewContractFunds = async () => {
     try {
       const provider = new ethers.providers.Web3Provider(window.ethereum);
@@ -196,10 +198,12 @@ export default function WaitlistDApp() {
     }
   };
 
+  // Render principal de la interfaz React-Bootstrap
   return (
     <Container className="mt-4" style={{ maxWidth: "700px" }}>
       <h1 className="text-center mb-4">Waiting List DApp</h1>
 
+      {/* Información de cuenta */}
       <Card className="shadow-sm mb-4">
         <Card.Body>
           <Card.Title>Account</Card.Title>
@@ -216,6 +220,7 @@ export default function WaitlistDApp() {
         </Card.Body>
       </Card>
 
+      {/* Sección de TokenEspera */}
       <Card className="shadow-sm mb-4">
         <Card.Body>
           <Card.Title>TokenEspera</Card.Title>
@@ -245,6 +250,7 @@ export default function WaitlistDApp() {
         </Card.Body>
       </Card>
 
+      {/* Sección de lista de espera */}
       <Card className="shadow-sm mb-4">
         <Card.Body>
           <Card.Title>Waiting List</Card.Title>
